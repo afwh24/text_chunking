@@ -1,123 +1,60 @@
-# Legal Document Semantic Chunking Pipeline
+# Legal Document Semantic Chunker
 
-A hybrid legal document chunking pipeline designed to segment lengthy parliamentary bills into context-preserving semantic chunks and proposition-level sub-chunks for downstream retrieval, search, and legal AI applications.
+A Python pipeline that transforms Singapore parliamentary bills into structured semantic chunks and word-count-based sub-chunks, suitable for downstream retrieval and legal AI applications. Built during a six-month AI Engineer internship at HTX, Singapore's national defence-tech agency.
 
----
+## Scale
 
-## Overview
+Over **2,000 parliamentary bills** processed.
 
-This project focuses on intelligent segmentation of parliamentary bills using a hybrid approach combining:
+## Why this exists
 
-- BERT-based semantic boundary detection
-- Sliding-window chunking with overlap support
-- Rule-based segmentation refinement
-- Customised tokenization for legal text
+Legal documents are structurally difficult for general-purpose NLP tools. They contain nested sections, numbered clauses, defined terms, and abbreviations (e.g. "s." for section, "Art." for Article) that standard sentence tokenisers routinely misinterpret, splitting sentences in the wrong places or losing structural context. This pipeline combines a pretrained neural chunking model with customised traditional NLP techniques to handle these cases correctly.
 
-The pipeline is designed to preserve semantic and legal context while preparing structured outputs for:
+## Pipeline
 
-- Retrieval-Augmented Generation (RAG)
-- Legal search systems
-- Long-context LLMs
-- Legislative document analysis
+### 1. Metadata extraction
+A single regular expression extracts the bill title and bill number from each document, matching text ending in "Bill" followed on the next line by a "Bill No. X/Y." pattern.
 
----
+### 2. Chunk boundary detection (BERT)
+Chunk boundaries are detected using a pretrained BERT-based token classification model, [`tim1900/bert-chunker-3`](https://huggingface.co/tim1900/bert-chunker-3), run on CPU. The tokenizer is configured with a maximum sequence length of 255 tokens.
 
-## Pipeline Architecture
+Three confidence thresholds were evaluated during development — 0.3, 0.5, and 0.7 — and **0.7** was selected as the final configuration based on inspection of output chunk quality.
 
-1. Load parliamentary bills stored in markdown format
-2. Extract bill metadata using regex (bill title, bill number, section information)
-3. Apply sentence segmentation using NLTK Punkt tokenizer with custom legal abbreviation handling
-4. Detect semantic chunk boundaries using BERT-based chunking model (tim1900/bert-chunker-3)
-5. Evaluate and select chunking threshold (evaluated 0.3, 0.5, 0.7 — selected 0.5)
-6. Apply sliding-window chunking with overlap support
-7. Merge very small chunks using chunk merging logic
-8. Generate fine-grained proposition-level sub-chunks using dependency parsing and propositional extraction
-9. Export structured JSON and JSONL outputs with bill metadata and chunk information
+The model processes text in sequential, non-overlapping windows, advancing to the position of the last detected chunk boundary (or to the end of the window if no boundary was found), rather than using a classic overlapping sliding window.
 
----
+### 3. Sentence-level sub-chunking (NLTK)
+Within each BERT-detected chunk, sentences are further split using a customised NLTK Punkt tokenizer. Two custom mechanisms improve accuracy on legal text:
 
-## Features
+- **Custom abbreviation list** (`chap`, `cap`, `no`, `sec`, `art`, `pt`, `vol`, `ann`) prevents the tokenizer from incorrectly treating these as sentence-ending periods
+- **Number-period protection**: numbered list markers (e.g. "1.", "3.") are temporarily masked before tokenization and restored afterward, preventing them from being misread as sentence boundaries
 
-### Hybrid Chunking Architecture
-- BERT-based semantic chunk boundary detection (tim1900/bert-chunker-3)
-- Sliding-window chunking with overlap support
-- Rule-based segmentation refinement
-- Chunk merging logic for very small chunks
-- Proposition-level sub-chunk generation via dependency parsing
+Sub-chunks shorter than ten words are merged into the following sub-chunk(s) until the combined length reaches at least ten words, reducing fragmentation in the final output.
 
-### Legal Document Processing
-- Parliamentary bill processing from markdown format
-- Regex-based bill title and bill number extraction
-- Section-level metadata extraction
-- Legislative writing style handling
-
-### Text Processing
-- Customised NLTK Punkt tokenizer with legal abbreviation support
-- SpaCy (en_core_web_sm) for NLP processing
-- Dependency parsing for propositional extraction
-- Regex-based title and bill number recognition
-
-### Structured Outputs
-- JSON and JSONL chunk outputs
-- Metadata-rich chunk records
-- Reproducible preprocessing pipeline
-
----
-
-## Dataset Schema
-
-Each output record contains:
+### 4. Output
+Each bill produces a single JSON file containing:
 
 ```json
 {
-  "bill_title": "Example Parliamentary Bill",
-  "bill_number": "Bill No. 1 of 2025",
-  "section": "Part I — Preliminary",
-  "chunk_id": 1,
-  "chunk_text": "An Act to amend...",
-  "sub_chunks": [
-    "An Act",
-    "to amend the relevant legislation"
+  "bill_title": "...",
+  "bill_number": "...",
+  "chunks": [
+    {
+      "chunk_index": 0,
+      "token_position": 0,
+      "chunk_text": "...",
+      "sub_chunks": [
+        { "sub_chunk_id": "0.0", "text": "..." },
+        { "sub_chunk_id": "0.1", "text": "..." }
+      ]
+    }
   ]
 }
 ```
 
----
+## Resume behaviour
 
-## Chunking Threshold Evaluation
+The pipeline checks whether an output file already exists for a given input bill before processing, allowing a long-running batch of 2,000+ bills to be safely interrupted and resumed without redoing completed work. Resumability is at the level of whole bills, not individual chunks.
 
-Three chunking thresholds were evaluated using the BERT-based chunking model:
+## Tech stack
 
-| Threshold | Behaviour |
-|---|---|
-| 0.3 | More aggressive chunking, smaller chunks |
-| 0.5 | Balanced — selected as final threshold |
-| 0.7 | More conservative chunking, larger chunks |
-
-Threshold 0.5 was selected as it produced the most semantically coherent chunk boundaries for parliamentary bill content.
-
----
-
-## Technologies Used
-
-- **Language:** Python
-- **Chunking Model:** BERT (tim1900/bert-chunker-3)
-- **NLP:** SpaCy (en_core_web_sm), NLTK Punkt Tokenizer
-- **Parsing:** Dependency Parsing, Propositional Extraction
-- **Output Format:** JSON, JSONL
-
----
-
-## Applications
-
-- Retrieval-Augmented Generation (RAG)
-- Legal search and retrieval systems
-- Long-context LLM document processing
-- Legislative document analysis
-- Legal AI dataset preparation
-
----
-
-## Notes
-
-This pipeline was built during an AI Engineer internship at the Home Team Science and Technology Agency (HTX), Singapore. Source documents processed are parliamentary bills in markdown format. Document outputs are not publicly available.
+Python, Hugging Face Transformers, PyTorch, NLTK
